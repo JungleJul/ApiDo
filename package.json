@@ -1,0 +1,34 @@
+{
+  "name": "linuxdo-cdk-monitor",
+  "version": "0.1.0",
+  "description": "Windows desktop monitor for linux.do CDK topics",
+  "main": "dist/main/index.js",
+  "license": "MIT",
+  "scripts": {
+    "build": "npm run clean && npm run build:main && npm run build:renderer",
+    "build:main": "tsc -p tsconfig.main.json",
+    "build:renderer": "tsc -p tsconfig.renderer.json && copyfiles -u 2 \"src/renderer/**/*.{html,css}\" dist/renderer",
+    "clean": "rimraf dist",
+    "dev": "concurrently \"npm:dev:main\" \"npm:dev:renderer\" \"npm:dev:electron\"",
+    "dev:electron": "wait-on dist/main/index.js dist/renderer/index.html && electron .",
+    "dev:main": "tsc -p tsconfig.main.json -w",
+    "dev:renderer": "tsc -p tsconfig.renderer.json -w",
+    "start": "electron .",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "electron": "^36.1.0",
+    "playwright": "^1.52.0",
+    "sql.js": "^1.13.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.1",
+    "concurrently": "^9.1.2",
+    "copyfiles": "^2.4.1",
+    "rimraf": "^6.0.1",
+    "typescript": "^5.8.3",
+    "vitest": "^3.1.2",
+    "wait-on": "^8.0.3"
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "debug.javascript.autoAttachFilter": "disabled",
+  "files.exclude": {
+    "**/dist": false
+  }
+}

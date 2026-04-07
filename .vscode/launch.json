@@ -1,0 +1,46 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Electron: Debug DOM (headful)",
+      "type": "node",
+      "request": "launch",
+      "cwd": "${workspaceFolder}",
+      "runtimeExecutable": "${workspaceFolder}\\node_modules\\.bin\\electron.cmd",
+      "args": ["."],
+      "preLaunchTask": "npm: build",
+      "env": {
+        "LINUXDO_DEBUG": "1",
+        "LINUXDO_HEADFUL": "1",
+        "LINUXDO_BROWSER_MODE": "edge-cdp",
+        "LINUXDO_BROWSER_CHANNEL": "msedge",
+        "LINUXDO_OPEN_DEVTOOLS": "1",
+        "LINUXDO_SAVE_HTML": "1",
+        "LINUXDO_VERBOSE_LOGS": "1"
+      },
+      "console": "integratedTerminal",
+      "outputCapture": "std",
+      "sourceMaps": true,
+      "outFiles": ["${workspaceFolder}/dist/**/*.js"],
+      "skipFiles": ["<node_internals>/**"]
+    },
+    {
+      "name": "Electron: Normal Run",
+      "type": "node",
+      "request": "launch",
+      "cwd": "${workspaceFolder}",
+      "runtimeExecutable": "${workspaceFolder}\\node_modules\\.bin\\electron.cmd",
+      "args": ["."],
+      "preLaunchTask": "npm: build",
+      "env": {
+        "LINUXDO_BROWSER_MODE": "edge-cdp",
+        "LINUXDO_BROWSER_CHANNEL": "msedge"
+      },
+      "console": "integratedTerminal",
+      "outputCapture": "std",
+      "sourceMaps": true,
+      "outFiles": ["${workspaceFolder}/dist/**/*.js"],
+      "skipFiles": ["<node_internals>/**"]
+    }
+  ]
+}
