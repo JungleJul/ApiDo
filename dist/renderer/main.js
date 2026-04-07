@@ -255,7 +255,8 @@ const render = (snapshot) => {
                 <th>是否需要领取CDK</th>
                 <th>CDK领取情况</th>
                 <th>CDK开始领取时间</th>
-                <th>其余外部链接</th>
+                 <th>调试读取情况</th>
+                 <th>其余外部链接</th>
                 <th>是否新帖</th>
               </tr>
             </thead>
@@ -274,10 +275,17 @@ const render = (snapshot) => {
                     ${row.lastResultMessage ? `<p class="meta">${escapeHtml(row.lastResultMessage)}</p>` : ""}
                   </td>
                   <td class="${row.status === "WAITING" ? "future-time" : ""}">${escapeHtml(formatTime(row.startAt))}</td>
-                  <td><div class="link-list">${renderLinks(row)}</div></td>
+                   <td>
+                     ${row.lastAttemptAt ? `<p class="meta">最近读取：${escapeHtml(formatTime(row.lastAttemptAt))}</p>` : '<p class="meta">最近读取：-</p>'}
+                     ${row.lastDecisionBasis ? `<p class="meta">判定依据：${escapeHtml(row.lastDecisionBasis)}</p>` : ""}
+                     ${row.lastReadSource ? `<p class="meta">来源：${escapeHtml(row.lastReadSource)}</p>` : ""}
+                     ${row.lastReadLooksLikeHydration ? '<p class="meta">判定：疑似读取到前端脚本/水合文本</p>' : ""}
+                     ${row.lastReadSummary ? `<p class="meta">摘要：${escapeHtml(row.lastReadSummary)}</p>` : ""}
+                   </td>
+                   <td><div class="link-list">${renderLinks(row)}</div></td>
                   <td>${row.isNew ? '<span class="chip chip-new">新帖</span>' : '<span class="muted">否</span>'}</td>
                 </tr>
-              `).join("") : '<tr><td colspan="7" class="empty-state">暂无命中主题，程序会按配置持续轮询。</td></tr>'}
+               `).join("") : '<tr><td colspan="8" class="empty-state">暂无命中主题，程序会按配置持续轮询。</td></tr>'}
             </tbody>
           </table>
         </div>

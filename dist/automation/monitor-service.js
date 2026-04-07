@@ -11,6 +11,7 @@ const node_path_1 = __importDefault(require("node:path"));
 const playwright_1 = require("playwright");
 const types_1 = require("../shared/types");
 const cdk_alerts_1 = require("../core/cdk-alerts");
+const cdk_debug_1 = require("../core/cdk-debug");
 const cdk_page_1 = require("../core/cdk-page");
 const cdk_time_1 = require("../core/cdk-time");
 const edge_cdp_1 = require("../core/edge-cdp");
@@ -28,6 +29,8 @@ const CDK_LOGIN_URL = "https://cdk.linux.do/login";
 const TOPIC_LIST_SELECTOR = "tr.topic-list-item, .topic-list tbody tr, .latest-topic-list-item";
 const LOGIN_NEEDED_STATES = ["LOGIN_NEEDED", "CLOUDFLARE_CHALLENGE"];
 const EXTERNAL_CDK_RECHECK_DELAY_MS = 8000;
+const CDK_TEXT_READ_RETRY_COUNT = 4;
+const CDK_TEXT_READ_RETRY_DELAY_MS = 1200;
 const createInitialProgress = () => ({
     phase: "STARTUP_LOGIN_CHECK",
     detail: "程序启动中，正在检查 linux.do 和 cdk.linux.do 的登录状态。",
@@ -586,7 +589,11 @@ class MonitorService extends node_events_1.EventEmitter {
                     endAt: null,
                     status: "NO_CDK",
                     lastAttemptAt: null,
-                    lastResultMessage: null
+                    lastResultMessage: null,
+                    lastReadSource: null,
+                    lastReadSummary: null,
+                    lastReadLooksLikeHydration: false,
+                    lastDecisionBasis: "未发现CDK链接"
                 });
             }
             this.lastError = null;
@@ -616,7 +623,11 @@ class MonitorService extends node_events_1.EventEmitter {
                     endAt: null,
                     status: "LOGIN_REQUIRED",
                     lastAttemptAt: new Date().toISOString(),
-                    lastResultMessage: "需要手动登录后重试"
+                    lastResultMessage: "需要手动登录后重试",
+                    lastReadSource: null,
+                    lastReadSummary: null,
+                    lastReadLooksLikeHydration: false,
+                    lastDecisionBasis: "登录拦截"
                 });
                 this.lastError = "CDK 页面要求重新登录。";
                 this.debugRuntime.warn("auth", "CDK page blocked by auth state", { topicId, authState: this.authState, cdkUrl });
@@ -624,7 +635,8 @@ class MonitorService extends node_events_1.EventEmitter {
                 this.notify("CDK 检测暂停", this.lastError);
                 return;
             }
-            const bodyText = ((await page.locator("body").innerText().catch(() => "")) || ((await page.textContent("body").catch(() => "")) ?? "")).trim();
+            const textInspection = await this.collectCdkTextInspection(page, topicId, cdkUrl);
+            const bodyText = textInspection.text;
             const parsedWindow = (0, cdk_time_1.parseCdkWindow)(bodyText);
             if (parsedWindow) {
                 const windowStatus = (0, cdk_time_1.classifyCdkWindow)(parsedWindow, new Date());
@@ -643,7 +655,16 @@ class MonitorService extends node_events_1.EventEmitter {
                         endAt: parsedWindow.endAt,
                         status: "ENDED",
                         lastAttemptAt: new Date().toISOString(),
-                        lastResultMessage: "活动已结束"
+                        lastResultMessage: "活动已结束",
+                        lastReadSource: textInspection.source,
+                        lastReadSummary: textInspection.summary,
+                        lastReadLooksLikeHydration: textInspection.looksLikeHydration,
+                        lastDecisionBasis: (0, cdk_debug_1.describeCdkDecisionBasis)({
+                            looksLikeHydration: textInspection.looksLikeHydration,
+                            usedWindowParsing: true,
+                            retryAttempts: textInspection.retryAttempts,
+                            finalStatus: "ENDED"
+                        })
                     });
                     this.emitSnapshot();
                     return;
@@ -657,7 +678,16 @@ class MonitorService extends node_events_1.EventEmitter {
                         endAt: parsedWindow.endAt,
                         status: "WAITING",
                         lastAttemptAt: null,
-                        lastResultMessage: alertPlan.message
+                        lastResultMessage: alertPlan.message,
+                        lastReadSource: textInspection.source,
+                        lastReadSummary: textInspection.summary,
+                        lastReadLooksLikeHydration: textInspection.looksLikeHydration,
+                        lastDecisionBasis: (0, cdk_debug_1.describeCdkDecisionBasis)({
+                            looksLikeHydration: textInspection.looksLikeHydration,
+                            usedWindowParsing: true,
+                            retryAttempts: textInspection.retryAttempts,
+                            finalStatus: "WAITING"
+                        })
                     });
                     this.scheduleManualClaimNotifications(topicId, parsedWindow.startAt, alertPlan.notifyAt, alertPlan.shouldNotifyImmediately, alertPlan.message);
                     this.emitSnapshot();
@@ -667,7 +697,7 @@ class MonitorService extends node_events_1.EventEmitter {
             else {
                 this.debugRuntime.warn("cdk", "Failed to parse cdk time window from page body", { topicId, cdkUrl });
             }
-            const record = this.evaluateManualClaimState(topicId, cdkUrl, parsedWindow?.startAt ?? null, parsedWindow?.endAt ?? null, bodyText);
+            const record = this.evaluateManualClaimState(topicId, cdkUrl, parsedWindow?.startAt ?? null, parsedWindow?.endAt ?? null, bodyText, textInspection.source, textInspection.summary, textInspection.looksLikeHydration, textInspection.retryAttempts);
             this.repository.upsertCdk(record);
             this.emitSnapshot();
         }
@@ -679,14 +709,18 @@ class MonitorService extends node_events_1.EventEmitter {
                 endAt: null,
                 status: "FAILED",
                 lastAttemptAt: new Date().toISOString(),
-                lastResultMessage: error instanceof Error ? error.message : String(error)
+                lastResultMessage: error instanceof Error ? error.message : String(error),
+                lastReadSource: null,
+                lastReadSummary: null,
+                lastReadLooksLikeHydration: false,
+                lastDecisionBasis: "读取异常"
             });
             this.lastError = error instanceof Error ? error.message : String(error);
             this.debugRuntime.error("cdk", "CDK handling failed", { topicId, cdkUrl, error: this.lastError });
             this.emitSnapshot();
         }
     }
-    evaluateManualClaimState(topicId, cdkUrl, startAt, endAt, bodyText) {
+    evaluateManualClaimState(topicId, cdkUrl, startAt, endAt, bodyText, readSource, readSummary, looksLikeHydration, retryAttempts) {
         this.clearCdkTimers(topicId);
         const analysis = (0, cdk_page_1.analyzeCdkPageText)(bodyText);
         this.debugRuntime.debug("cdk", "Evaluating manual-claim page state", {
@@ -695,7 +729,10 @@ class MonitorService extends node_events_1.EventEmitter {
             remainingQuota: analysis.remainingQuota,
             totalQuota: analysis.totalQuota,
             status: analysis.status,
-            bodyPreview: analysis.normalizedText.slice(0, 500)
+            bodyPreview: analysis.normalizedText.slice(0, 500),
+            readSource,
+            readSummary,
+            looksLikeHydration
         });
         if (analysis.status === "CLAIMABLE") {
             const message = analysis.message || (0, cdk_alerts_1.getClaimableManualMessage)();
@@ -703,20 +740,20 @@ class MonitorService extends node_events_1.EventEmitter {
                 this.notify("CDK 可手动领取", message);
                 this.claimableNotified.add(topicId);
             }
-            return this.makeCdkRecord(topicId, cdkUrl, startAt, endAt, "CLAIMABLE", message);
+            return this.makeCdkRecord(topicId, cdkUrl, startAt, endAt, "CLAIMABLE", message, readSource, readSummary, looksLikeHydration, retryAttempts);
         }
         if (analysis.status === "OUT_OF_STOCK") {
-            return this.makeCdkRecord(topicId, cdkUrl, startAt, endAt, "OUT_OF_STOCK", analysis.message);
+            return this.makeCdkRecord(topicId, cdkUrl, startAt, endAt, "OUT_OF_STOCK", analysis.message, readSource, readSummary, looksLikeHydration, retryAttempts);
         }
         if (analysis.status === "CLAIMED") {
-            return this.makeCdkRecord(topicId, cdkUrl, startAt, endAt, "CLAIMED", analysis.message);
+            return this.makeCdkRecord(topicId, cdkUrl, startAt, endAt, "CLAIMED", analysis.message, readSource, readSummary, looksLikeHydration, retryAttempts);
         }
         if (analysis.status === "ENDED") {
-            return this.makeCdkRecord(topicId, cdkUrl, startAt, endAt, "ENDED", analysis.message);
+            return this.makeCdkRecord(topicId, cdkUrl, startAt, endAt, "ENDED", analysis.message, readSource, readSummary, looksLikeHydration, retryAttempts);
         }
-        return this.makeCdkRecord(topicId, cdkUrl, startAt, endAt, "FAILED", analysis.message);
+        return this.makeCdkRecord(topicId, cdkUrl, startAt, endAt, "FAILED", analysis.message, readSource, readSummary, looksLikeHydration, retryAttempts);
     }
-    makeCdkRecord(topicId, cdkUrl, startAt, endAt, status, message) {
+    makeCdkRecord(topicId, cdkUrl, startAt, endAt, status, message, readSource, readSummary, looksLikeHydration, retryAttempts) {
         return {
             topicId,
             cdkUrl,
@@ -724,8 +761,43 @@ class MonitorService extends node_events_1.EventEmitter {
             endAt,
             status,
             lastAttemptAt: new Date().toISOString(),
-            lastResultMessage: message
+            lastResultMessage: message,
+            lastReadSource: readSource,
+            lastReadSummary: readSummary,
+            lastReadLooksLikeHydration: looksLikeHydration,
+            lastDecisionBasis: (0, cdk_debug_1.describeCdkDecisionBasis)({
+                looksLikeHydration,
+                usedWindowParsing: false,
+                retryAttempts,
+                finalStatus: status
+            })
         };
+    }
+    async collectCdkTextInspection(page, topicId, cdkUrl) {
+        let latestInspection = (0, cdk_debug_1.inspectCdkTextCandidates)([{ source: "title", text: (await page.title().catch(() => "")) ?? "" }]);
+        for (let attempt = 1; attempt <= CDK_TEXT_READ_RETRY_COUNT; attempt += 1) {
+            const bodyInnerText = (await page.locator("body").innerText().catch(() => "")) ?? "";
+            const bodyTextContent = (await page.textContent("body").catch(() => "")) ?? "";
+            const titleText = (await page.title().catch(() => "")) ?? "";
+            latestInspection = (0, cdk_debug_1.inspectCdkTextCandidates)([
+                { source: "innerText", text: bodyInnerText },
+                { source: "textContent", text: bodyTextContent },
+                { source: "title", text: titleText }
+            ]);
+            this.debugRuntime.info("cdk", "Collected cdk text candidates", {
+                topicId,
+                cdkUrl,
+                attempt,
+                selectedSource: latestInspection.source,
+                looksLikeHydration: latestInspection.looksLikeHydration,
+                summary: latestInspection.summary
+            });
+            if (!(0, cdk_debug_1.shouldRetryCdkTextInspection)(latestInspection) || attempt === CDK_TEXT_READ_RETRY_COUNT) {
+                return { ...latestInspection, retryAttempts: attempt };
+            }
+            await (0, time_1.delay)(CDK_TEXT_READ_RETRY_DELAY_MS);
+        }
+        return latestInspection;
     }
     restoreWaitingClaims() {
         for (const row of this.repository.listRows()) {

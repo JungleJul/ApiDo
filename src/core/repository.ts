@@ -10,7 +10,11 @@ const DEFAULT_CDK: Omit<CdkRecord, "topicId"> = {
   endAt: null,
   status: "NO_CDK",
   lastAttemptAt: null,
-  lastResultMessage: null
+  lastResultMessage: null,
+  lastReadSource: null,
+  lastReadSummary: null,
+  lastReadLooksLikeHydration: false,
+  lastDecisionBasis: null
 };
 
 export class SqliteRepository {
@@ -43,9 +47,26 @@ export class SqliteRepository {
         status TEXT NOT NULL,
         last_attempt_at TEXT,
         last_result_message TEXT,
+        last_read_source TEXT,
+        last_read_summary TEXT,
+        last_read_looks_like_hydration INTEGER NOT NULL DEFAULT 0,
+        last_decision_basis TEXT,
         FOREIGN KEY(topic_id) REFERENCES topics(topic_id) ON DELETE CASCADE
       );
     `);
+
+    this.tryAddColumn(`ALTER TABLE cdks ADD COLUMN last_read_source TEXT`);
+    this.tryAddColumn(`ALTER TABLE cdks ADD COLUMN last_read_summary TEXT`);
+    this.tryAddColumn(`ALTER TABLE cdks ADD COLUMN last_read_looks_like_hydration INTEGER NOT NULL DEFAULT 0`);
+    this.tryAddColumn(`ALTER TABLE cdks ADD COLUMN last_decision_basis TEXT`);
+  }
+
+  private tryAddColumn(sql: string): void {
+    try {
+      this.db.exec(sql);
+    } catch {
+      // Column already exists for existing local databases.
+    }
   }
 
   upsertTopic(record: TopicRecord): void {
@@ -97,15 +118,23 @@ export class SqliteRepository {
         end_at,
         status,
         last_attempt_at,
-        last_result_message
-      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        last_result_message,
+        last_read_source,
+        last_read_summary,
+        last_read_looks_like_hydration,
+        last_decision_basis
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(topic_id) DO UPDATE SET
         cdk_url = excluded.cdk_url,
         start_at = excluded.start_at,
         end_at = excluded.end_at,
         status = excluded.status,
         last_attempt_at = excluded.last_attempt_at,
-        last_result_message = excluded.last_result_message
+        last_result_message = excluded.last_result_message,
+        last_read_source = excluded.last_read_source,
+        last_read_summary = excluded.last_read_summary,
+        last_read_looks_like_hydration = excluded.last_read_looks_like_hydration,
+        last_decision_basis = excluded.last_decision_basis
     `);
 
     statement.run(
@@ -115,7 +144,11 @@ export class SqliteRepository {
       record.endAt,
       record.status,
       record.lastAttemptAt,
-      record.lastResultMessage
+      record.lastResultMessage,
+      record.lastReadSource,
+      record.lastReadSummary,
+      record.lastReadLooksLikeHydration ? 1 : 0,
+      record.lastDecisionBasis
     );
   }
 
@@ -147,7 +180,11 @@ export class SqliteRepository {
         c.end_at,
         c.status,
         c.last_attempt_at,
-        c.last_result_message
+        c.last_result_message,
+        c.last_read_source,
+        c.last_read_summary,
+        c.last_read_looks_like_hydration,
+        c.last_decision_basis
       FROM topics t
       LEFT JOIN cdks c ON c.topic_id = t.topic_id
       ORDER BY t.discovered_at DESC, t.topic_id DESC
@@ -186,6 +223,10 @@ interface CdkDbRow {
   status: CdkRecord["status"] | null;
   last_attempt_at: string | null;
   last_result_message: string | null;
+  last_read_source: string | null;
+  last_read_summary: string | null;
+  last_read_looks_like_hydration: number | null;
+  last_decision_basis: string | null;
 }
 
 type JoinedDbRow = TopicDbRow & CdkDbRow;
@@ -210,5 +251,9 @@ const mapCdkRow = (row: Partial<CdkDbRow>): CdkRecord => ({
   endAt: row.end_at ?? DEFAULT_CDK.endAt,
   status: row.status ?? DEFAULT_CDK.status,
   lastAttemptAt: row.last_attempt_at ?? DEFAULT_CDK.lastAttemptAt,
-  lastResultMessage: row.last_result_message ?? DEFAULT_CDK.lastResultMessage
+  lastResultMessage: row.last_result_message ?? DEFAULT_CDK.lastResultMessage,
+  lastReadSource: row.last_read_source ?? DEFAULT_CDK.lastReadSource,
+  lastReadSummary: row.last_read_summary ?? DEFAULT_CDK.lastReadSummary,
+  lastReadLooksLikeHydration: Boolean(row.last_read_looks_like_hydration ?? DEFAULT_CDK.lastReadLooksLikeHydration),
+  lastDecisionBasis: row.last_decision_basis ?? DEFAULT_CDK.lastDecisionBasis
 });

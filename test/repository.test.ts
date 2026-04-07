@@ -40,6 +40,10 @@ const createCdk = (partial: Partial<CdkRecord>): CdkRecord => ({
   status: "WAITING",
   lastAttemptAt: null,
   lastResultMessage: null,
+  lastReadSource: null,
+  lastReadSummary: null,
+  lastReadLooksLikeHydration: false,
+  lastDecisionBasis: null,
   ...partial
 });
 

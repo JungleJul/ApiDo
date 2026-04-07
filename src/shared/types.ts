@@ -82,6 +82,10 @@ export interface CdkRecord {
   status: CdkStatus;
   lastAttemptAt: string | null;
   lastResultMessage: string | null;
+  lastReadSource: string | null;
+  lastReadSummary: string | null;
+  lastReadLooksLikeHydration: boolean;
+  lastDecisionBasis: string | null;
 }
 
 export interface TopicRow extends TopicRecord, CdkRecord {
